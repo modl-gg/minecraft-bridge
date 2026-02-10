@@ -1,0 +1,52 @@
+api:
+  base-url: "https://api.modl.gg/v1"
+  api-key: "your-api-key-here"
+  server-domain: "yourserver.modl.gg"
+  debug: false
+
+issuer-name: "Anticheat"
+server-name: "Server 1"
+
+defaults:
+  report-threshold: 20      # VL to create report (-1 to disable)
+  punish-threshold: 40      # VL to punish (-1 to disable)
+  punish-action: "ban"      # "ban" or "kick"
+  punish-duration: 604800   # seconds (-1 for permanent)
+  punish-type-ordinal: 14   # 14 = Cheating
+  punish-reason: "Unfair Advantage - {source} {check}"
+  punish-severity: "HIGH"
+
+decay:
+  interval: 30    # seconds between decay cycles
+  amount: 2.0     # VL subtracted per cycle
+
+cooldowns:
+  report: 120       # seconds between reports per player+check
+  punishment: 300   # seconds between punishments per player+check
+
+checks:
+  grim:
+    killaura:
+      enabled: true
+      report-threshold: 15
+      punish-threshold: 30
+      punish-action: "ban"
+      punish-duration: -1
+      punish-reason: "Cheating - KillAura"
+    speed:
+      enabled: true
+      report-threshold: 25
+      punish-threshold: 50
+    groundspoof:
+      enabled: false
+  polar:
+    killaura:
+      enabled: true
+      report-threshold: 10
+      punish-threshold: 25
+    reach:
+      enabled: true
+      report-threshold: 15
+      punish-threshold: 35
+
+execute-kicks-locally: true

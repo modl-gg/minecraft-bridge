@@ -1,0 +1,7 @@
+name: ModlBridge
+main: gg.modl.bridge.ModlBridgePlugin
+version: '1.0.0'
+author: modl
+description: Bridges Grim and Polar anticheat detections to the MODL panel
+api-version: '1.13'
+softdepend: [GrimAC, Polar, modl]
