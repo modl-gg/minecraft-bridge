@@ -4,6 +4,7 @@ testing-mode: false
 debug: false
 
 issuer-name: "Anti-cheat"
+anticheat-name: "Anti-cheat"  # Display name used in report subjects (e.g. "[Anti-cheat] Speed - Player")
 server-name: "Server 1"
 
 ban-type-ordinal: 14    # Punishment type ordinal for /anticheat-ban (14 = Cheating)

@@ -37,6 +37,10 @@ public class BridgeConfig {
         return config.getString("issuer-name", "Anti-cheat");
     }
 
+    public String getAnticheatName() {
+        return config.getString("anticheat-name", "Anti-cheat");
+    }
+
     public String getServerName() {
         return config.getString("server-name", "Server 1");
     }

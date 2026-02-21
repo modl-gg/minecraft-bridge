@@ -60,7 +60,7 @@ public class AutoReporter {
     private void submitReport(UUID uuid, String playerName, DetectionSource source, String checkName, int vl) {
         List<ViolationRecord> records = violationTracker.getRecords(uuid);
 
-        String subject = "[" + source.name() + "] " + checkName + " - " + playerName + " (VL: " + vl + ")";
+        String subject = "[" + config.getAnticheatName() + "] " + checkName + " - " + playerName + " (VL: " + vl + ")";
 
         String description = "**Automated anticheat report.**\n\n" +
                 "**Player:** " + playerName + "\n\n" +
@@ -71,7 +71,7 @@ public class AutoReporter {
                         .collect(Collectors.joining("\n")) +
                 "\n```";
 
-        List<String> tags = List.of("anticheat", source.name().toLowerCase(), checkName.toLowerCase());
+        List<String> tags = List.of("automated");
 
         CreateTicketRequest request = new CreateTicketRequest(
                 uuid.toString(),
