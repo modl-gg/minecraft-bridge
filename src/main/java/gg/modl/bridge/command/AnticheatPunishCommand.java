@@ -34,9 +34,9 @@ public class AnticheatPunishCommand implements CommandExecutor {
 
         if (args.length < 1) {
             if (label.equalsIgnoreCase("anticheat-ban")) {
-                sender.sendMessage("Usage: /anticheat-ban <player> [-lenient|-normal|-severe] [reason...]");
+                sender.sendMessage("Usage: /anticheat-ban <player> [-lenient|-normal|-severe] [notes...]");
             } else {
-                sender.sendMessage("Usage: /anticheat-kick <player> [reason...]");
+                sender.sendMessage("Usage: /anticheat-kick <player> [kick message...]");
             }
             return true;
         }
