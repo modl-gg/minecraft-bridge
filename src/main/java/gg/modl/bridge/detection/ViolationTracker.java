@@ -67,9 +67,9 @@ public class ViolationTracker {
             synchronized (list) {
                 list.removeIf(r -> r.getTimestamp() < cutoff);
             }
-            if (list.isEmpty()) {
-                records.remove(entry.getKey());
-            }
+            // Don't remove empty entries here — resetPlayer handles that on quit.
+            // Removing here races with addViolation/getViolationCount since
+            // computeIfAbsent can return a list that's about to be removed.
         }
     }
 }

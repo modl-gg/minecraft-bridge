@@ -1,4 +1,5 @@
 api-key: "your-api-key-here"
+server-domain: "yourserver.modl.gg"
 testing-mode: false
 debug: false
 

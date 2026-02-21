@@ -21,6 +21,10 @@ public class BridgeConfig {
         return config.getString("api-key", "");
     }
 
+    public String getServerDomain() {
+        return config.getString("server-domain", "");
+    }
+
     public boolean isTestingMode() {
         return config.getBoolean("testing-mode", false);
     }
@@ -59,6 +63,10 @@ public class BridgeConfig {
 
     public boolean isValid() {
         String apiKey = getApiKey();
-        return apiKey != null && !apiKey.isEmpty() && !apiKey.equals("your-api-key-here");
+        String serverDomain = getServerDomain();
+        if (apiKey == null || apiKey.isEmpty() || apiKey.equals("your-api-key-here")) {
+            return false;
+        }
+        return serverDomain != null && !serverDomain.isEmpty() && !serverDomain.equals("yourserver.modl.gg");
     }
 }

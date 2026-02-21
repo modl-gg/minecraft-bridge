@@ -49,7 +49,7 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
         bridgeConfig = new BridgeConfig(getConfig());
 
         if (!bridgeConfig.isValid()) {
-            getLogger().severe("[ModlBridge] Invalid configuration! Please set your api-key in config.yml");
+            getLogger().severe("[ModlBridge] Invalid configuration! Please set your api-key and server-domain in config.yml");
             getLogger().severe("[ModlBridge] Plugin will be disabled.");
             getServer().getPluginManager().disablePlugin(this);
             return;
@@ -58,6 +58,7 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
         httpClient = new BridgeHttpClient(
                 bridgeConfig.getBaseUrl(),
                 bridgeConfig.getApiKey(),
+                bridgeConfig.getServerDomain(),
                 bridgeConfig.isDebug(),
                 getLogger()
         );
@@ -79,7 +80,7 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
         getCommand("anticheat-report").setExecutor(reportCommand);
 
         // Hook into GrimAC if available
-        GrimHook grimHook = new GrimHook(this, violationTracker, autoReporter);
+        GrimHook grimHook = new GrimHook(this, bridgeConfig, violationTracker, autoReporter);
         if (grimHook.isAvailable()) {
             grimHook.register();
             hooks.add(grimHook);
@@ -87,7 +88,7 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
 
         // Hook into Polar if available (non-LoaderApi path, e.g. if Polar loaded before us)
         if (!polarAvailable) {
-            PolarHook polarHook = new PolarHook(this, violationTracker, autoReporter);
+            PolarHook polarHook = new PolarHook(this, bridgeConfig, violationTracker, autoReporter);
             if (polarHook.isAvailable()) {
                 polarHook.register();
                 hooks.add(polarHook);
@@ -99,6 +100,13 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
         }
 
         getLogger().info("[ModlBridge] Enabled with " + hooks.size() + " anticheat hook(s)" + (polarAvailable ? " (Polar pending callback)" : ""));
+
+        if (bridgeConfig.isDebug()) {
+            getLogger().info("[ModlBridge] [DEBUG] Config: defaultThreshold=" + bridgeConfig.getReportViolationThreshold("_")
+                    + " cooldown=" + bridgeConfig.getReportCooldown() + "s"
+                    + " api=" + bridgeConfig.getBaseUrl()
+                    + " domain=" + bridgeConfig.getServerDomain());
+        }
     }
 
     @Override
@@ -125,7 +133,7 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
             return;
         }
 
-        PolarHook polarHook = new PolarHook(this, violationTracker, autoReporter);
+        PolarHook polarHook = new PolarHook(this, bridgeConfig, violationTracker, autoReporter);
         polarHook.register();
         hooks.add(polarHook);
     }

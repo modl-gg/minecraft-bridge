@@ -32,6 +32,12 @@ public class AutoReporter {
         int vl = violationTracker.getViolationCount(uuid, source, checkName);
         int threshold = config.getReportViolationThreshold(checkName);
 
+        if (config.isDebug()) {
+            plugin.getLogger().info("[ModlBridge] [DEBUG] checkAndReport: player=" + playerName
+                    + " source=" + source.name() + " check=" + checkName
+                    + " vl=" + vl + " threshold=" + threshold);
+        }
+
         if (vl < threshold) {
             return;
         }
@@ -39,6 +45,11 @@ public class AutoReporter {
         Long lastReport = reportCooldowns.get(uuid);
         long now = System.currentTimeMillis();
         if (lastReport != null && (now - lastReport) < config.getReportCooldown() * 1000L) {
+            if (config.isDebug()) {
+                long remaining = (config.getReportCooldown() * 1000L) - (now - lastReport);
+                plugin.getLogger().info("[ModlBridge] [DEBUG] Report blocked by cooldown for " + playerName
+                        + " (" + (remaining / 1000) + "s remaining)");
+            }
             return;
         }
 
@@ -51,20 +62,21 @@ public class AutoReporter {
 
         String subject = "[" + source.name() + "] " + checkName + " - " + playerName + " (VL: " + vl + ")";
 
-        String description = "Automated anticheat report.\n\n" +
-                "Player: " + playerName + "\n" +
-                "Trigger: " + source.name() + " " + checkName + " (VL: " + vl + ")\n\n" +
-                "Recent violations:\n" +
+        String description = "**Automated anticheat report.**\n\n" +
+                "**Player:** " + playerName + "\n\n" +
+                "**Trigger:** " + source.name() + " " + checkName + " (VL: " + vl + ")\n\n" +
+                "**Recent violations:**\n```\n" +
                 records.stream()
                         .map(ViolationRecord::toString)
-                        .collect(Collectors.joining("\n"));
+                        .collect(Collectors.joining("\n")) +
+                "\n```";
 
         List<String> tags = List.of("anticheat", source.name().toLowerCase(), checkName.toLowerCase());
 
         CreateTicketRequest request = new CreateTicketRequest(
                 uuid.toString(),
                 config.getIssuerName(),
-                "REPORT",
+                "player",
                 subject,
                 description,
                 uuid.toString(),
@@ -79,6 +91,8 @@ public class AutoReporter {
         httpClient.createTicket(request).thenAccept(response -> {
             if (response.isSuccess()) {
                 plugin.getLogger().info("[ModlBridge] Report created for " + playerName + " - Ticket: " + response.getTicketId());
+                // Clear reported violations so they don't appear in the next report
+                violationTracker.resetPlayer(uuid);
             } else {
                 plugin.getLogger().warning("[ModlBridge] Failed to create report for " + playerName + ": " + response.getMessage());
             }

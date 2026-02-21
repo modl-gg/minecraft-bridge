@@ -1,5 +1,6 @@
 package gg.modl.bridge.hook;
 
+import gg.modl.bridge.config.BridgeConfig;
 import gg.modl.bridge.detection.DetectionSource;
 import gg.modl.bridge.detection.ViolationTracker;
 import gg.modl.bridge.report.AutoReporter;
@@ -14,12 +15,14 @@ import java.util.UUID;
 public class PolarHook implements AntiCheatHook {
 
     private final JavaPlugin plugin;
+    private final BridgeConfig config;
     private final ViolationTracker violationTracker;
     private final AutoReporter autoReporter;
     private PolarApi polarApi;
 
-    public PolarHook(JavaPlugin plugin, ViolationTracker violationTracker, AutoReporter autoReporter) {
+    public PolarHook(JavaPlugin plugin, BridgeConfig config, ViolationTracker violationTracker, AutoReporter autoReporter) {
         this.plugin = plugin;
+        this.config = config;
         this.violationTracker = violationTracker;
         this.autoReporter = autoReporter;
     }
@@ -64,12 +67,25 @@ public class PolarHook implements AntiCheatHook {
     }
 
     private void onDetection(DetectionAlertEvent event) {
-        UUID uuid = event.user().uuid();
-        String playerName = event.user().username();
-        String checkName = event.check().type().name();
-        String verbose = event.details();
+        try {
+            UUID uuid = event.user().uuid();
+            String playerName = event.user().username();
+            String checkName = event.check().type().name();
+            String verbose = event.details();
 
-        violationTracker.addViolation(uuid, DetectionSource.POLAR, checkName, verbose);
-        autoReporter.checkAndReport(uuid, playerName, DetectionSource.POLAR, checkName);
+            if (config.isDebug()) {
+                int currentCount = violationTracker.getViolationCount(uuid, DetectionSource.POLAR, checkName);
+                plugin.getLogger().info("[ModlBridge] [DEBUG] Polar detection: player=" + playerName
+                        + " check=" + checkName + " currentVL=" + (currentCount + 1)
+                        + " threshold=" + config.getReportViolationThreshold(checkName)
+                        + " details=" + verbose);
+            }
+
+            violationTracker.addViolation(uuid, DetectionSource.POLAR, checkName, verbose);
+            autoReporter.checkAndReport(uuid, playerName, DetectionSource.POLAR, checkName);
+        } catch (Exception e) {
+            plugin.getLogger().warning("[ModlBridge] Error processing Polar detection event: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 }

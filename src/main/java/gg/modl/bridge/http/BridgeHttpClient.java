@@ -22,15 +22,17 @@ public class BridgeHttpClient {
 
     private final String baseUrl;
     private final String apiKey;
+    private final String serverDomain;
     private final boolean debug;
     private final HttpClient httpClient;
     private final ExecutorService executor;
     private final Gson gson;
     private final Logger logger;
 
-    public BridgeHttpClient(String baseUrl, String apiKey, boolean debug, Logger logger) {
+    public BridgeHttpClient(String baseUrl, String apiKey, String serverDomain, boolean debug, Logger logger) {
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
+        this.serverDomain = serverDomain;
         this.debug = debug;
         this.logger = logger;
         this.gson = new Gson();
@@ -53,6 +55,7 @@ public class BridgeHttpClient {
         return HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + endpoint))
                 .header("X-API-Key", apiKey)
+                .header("X-Server-Domain", serverDomain)
                 .header("Content-Type", "application/json");
     }
 
