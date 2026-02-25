@@ -9,6 +9,7 @@ import gg.modl.bridge.hook.GrimHook;
 import gg.modl.bridge.hook.PolarHook;
 import gg.modl.bridge.http.BridgeHttpClient;
 import gg.modl.bridge.report.AutoReporter;
+import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -25,6 +26,7 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
     private AutoReporter autoReporter;
     private final List<AntiCheatHook> hooks = new ArrayList<>();
     private boolean polarAvailable = false;
+    private boolean grimAvailable = false;
 
     @Override
     public void onLoad() {
@@ -79,9 +81,11 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
         AnticheatReportCommand reportCommand = new AnticheatReportCommand(this, bridgeConfig, httpClient, violationTracker);
         getCommand("anticheat-report").setExecutor(reportCommand);
 
+        grimAvailable = Bukkit.getPluginManager().getPlugin("GrimAC") != null;
+
         // Hook into GrimAC if available
-        GrimHook grimHook = new GrimHook(this, bridgeConfig, violationTracker, autoReporter);
-        if (grimHook.isAvailable()) {
+        if (grimAvailable) {
+            GrimHook grimHook = new GrimHook(this, bridgeConfig, violationTracker, autoReporter);
             grimHook.register();
             hooks.add(grimHook);
         }
