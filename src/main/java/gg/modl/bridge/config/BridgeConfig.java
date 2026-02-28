@@ -2,6 +2,9 @@ package gg.modl.bridge.config;
 
 import org.bukkit.configuration.file.FileConfiguration;
 
+import java.util.Collections;
+import java.util.List;
+
 public class BridgeConfig {
 
     private final FileConfiguration config;
@@ -63,6 +66,11 @@ public class BridgeConfig {
             return config.getInt(checkPath);
         }
         return config.getInt("report-violation-threshold.default", 10);
+    }
+
+    public List<String> getStatWipeCommands() {
+        List<String> commands = config.getStringList("stat-wipe-commands");
+        return commands != null ? commands : Collections.emptyList();
     }
 
     public boolean isValid() {

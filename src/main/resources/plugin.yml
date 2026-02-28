@@ -2,7 +2,7 @@ name: modl-bridge
 main: gg.modl.bridge.ModlBridgePlugin
 version: '1.0.1'
 author: modl
-description: Bridges Grim and Polar anticheat detections to modl
+description: Bridges anticheat detections and stat-wipe commands to modl
 api-version: '1.13'
 softdepend: [GrimAC, Polar, modl]
 commands:

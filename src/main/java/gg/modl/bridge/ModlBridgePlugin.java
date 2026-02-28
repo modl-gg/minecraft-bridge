@@ -9,6 +9,8 @@ import gg.modl.bridge.hook.GrimHook;
 import gg.modl.bridge.hook.PolarHook;
 import gg.modl.bridge.http.BridgeHttpClient;
 import gg.modl.bridge.report.AutoReporter;
+import gg.modl.bridge.statwipe.StatWipeHandler;
+import gg.modl.bridge.statwipe.StatWipeMessageListener;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -24,6 +26,7 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
     private BridgeHttpClient httpClient;
     private ViolationTracker violationTracker;
     private AutoReporter autoReporter;
+    private StatWipeHandler statWipeHandler;
     private final List<AntiCheatHook> hooks = new ArrayList<>();
     private boolean polarAvailable = false;
     private boolean grimAvailable = false;
@@ -103,6 +106,12 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
             getLogger().warning("[ModlBridge] No anticheat plugins detected! Install GrimAC or Polar for the bridge to function.");
         }
 
+        // Initialize stat wipe handler and register plugin messaging channel
+        statWipeHandler = new StatWipeHandler(this, bridgeConfig);
+        getServer().getMessenger().registerIncomingPluginChannel(this, StatWipeMessageListener.CHANNEL,
+                new StatWipeMessageListener(this, statWipeHandler));
+        getServer().getMessenger().registerOutgoingPluginChannel(this, StatWipeMessageListener.CHANNEL);
+
         getLogger().info("[ModlBridge] Enabled with " + hooks.size() + " anticheat hook(s)" + (polarAvailable ? " (Polar pending callback)" : ""));
 
         if (bridgeConfig.isDebug()) {
@@ -128,6 +137,10 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
             httpClient.shutdown();
         }
 
+        // Unregister plugin messaging channels
+        getServer().getMessenger().unregisterIncomingPluginChannel(this, StatWipeMessageListener.CHANNEL);
+        getServer().getMessenger().unregisterOutgoingPluginChannel(this, StatWipeMessageListener.CHANNEL);
+
         getLogger().info("[ModlBridge] Disabled");
     }
 
@@ -140,6 +153,23 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
         PolarHook polarHook = new PolarHook(this, bridgeConfig, violationTracker, autoReporter);
         polarHook.register();
         hooks.add(polarHook);
+    }
+
+    /**
+     * Execute stat-wipe commands for a player. Called by the modl plugin via reflection
+     * (same-server setup) or via plugin messaging (proxy setup).
+     *
+     * @param username     the player's username
+     * @param punishmentId the punishment ID for logging
+     * @return true if all commands executed successfully
+     */
+    public boolean executeStatWipeCommands(String username, String punishmentId) {
+        if (statWipeHandler == null) {
+            getLogger().warning("[ModlBridge] Stat wipe handler not initialized");
+            return false;
+        }
+        // UUID not available in direct call path — pass empty string
+        return statWipeHandler.execute(username, "", punishmentId);
     }
 
     @EventHandler

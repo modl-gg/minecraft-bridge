@@ -15,3 +15,8 @@ report-violation-threshold: # the VL to create a report for the player automatic
   checks:
     killaura: 15
     speed: 20
+
+# Commands to run as console when a stat-wipe punishment expires.
+# Placeholders: {player} = player username, {uuid} = player UUID
+stat-wipe-commands:
+  - "clearstats {player}"
