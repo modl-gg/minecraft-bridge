@@ -73,6 +73,10 @@ public class BridgeConfig {
         return commands != null ? commands : Collections.emptyList();
     }
 
+    public int getQueryPort() {
+        return config.getInt("query-port", 25590);
+    }
+
     public boolean isValid() {
         String apiKey = getApiKey();
         String serverDomain = getServerDomain();

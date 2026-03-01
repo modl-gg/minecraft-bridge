@@ -8,9 +8,9 @@ import gg.modl.bridge.hook.AntiCheatHook;
 import gg.modl.bridge.hook.GrimHook;
 import gg.modl.bridge.hook.PolarHook;
 import gg.modl.bridge.http.BridgeHttpClient;
+import gg.modl.bridge.query.BridgeQueryServer;
 import gg.modl.bridge.report.AutoReporter;
 import gg.modl.bridge.statwipe.StatWipeHandler;
-import gg.modl.bridge.statwipe.StatWipeMessageListener;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -27,6 +27,7 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
     private ViolationTracker violationTracker;
     private AutoReporter autoReporter;
     private StatWipeHandler statWipeHandler;
+    private BridgeQueryServer queryServer;
     private final List<AntiCheatHook> hooks = new ArrayList<>();
     private boolean polarAvailable = false;
     private boolean grimAvailable = false;
@@ -106,11 +107,23 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
             getLogger().warning("[ModlBridge] No anticheat plugins detected! Install GrimAC or Polar for the bridge to function.");
         }
 
-        // Initialize stat wipe handler and register plugin messaging channel
+        // Initialize stat wipe handler
         statWipeHandler = new StatWipeHandler(this, bridgeConfig);
-        getServer().getMessenger().registerIncomingPluginChannel(this, StatWipeMessageListener.CHANNEL,
-                new StatWipeMessageListener(this, statWipeHandler));
-        getServer().getMessenger().registerOutgoingPluginChannel(this, StatWipeMessageListener.CHANNEL);
+
+        // Start TCP query server for direct proxy communication
+        // Uses the API key as the shared secret for authentication
+        queryServer = new BridgeQueryServer(
+                bridgeConfig.getQueryPort(),
+                bridgeConfig.getApiKey(),
+                statWipeHandler,
+                this
+        );
+        queryServer.start();
+
+        // Check for modl plugin on same server (Spigot direct detection)
+        if (Bukkit.getPluginManager().getPlugin("modl") != null) {
+            getLogger().info("[ModlBridge] modl plugin detected on same server (Spigot direct)");
+        }
 
         getLogger().info("[ModlBridge] Enabled with " + hooks.size() + " anticheat hook(s)" + (polarAvailable ? " (Polar pending callback)" : ""));
 
@@ -124,6 +137,10 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (queryServer != null) {
+            queryServer.shutdown();
+        }
+
         if (violationTracker != null) {
             violationTracker.stopCleanupTask();
         }
@@ -136,10 +153,6 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
         if (httpClient != null) {
             httpClient.shutdown();
         }
-
-        // Unregister plugin messaging channels
-        getServer().getMessenger().unregisterIncomingPluginChannel(this, StatWipeMessageListener.CHANNEL);
-        getServer().getMessenger().unregisterOutgoingPluginChannel(this, StatWipeMessageListener.CHANNEL);
 
         getLogger().info("[ModlBridge] Disabled");
     }
@@ -157,7 +170,7 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
 
     /**
      * Execute stat-wipe commands for a player. Called by the modl plugin via reflection
-     * (same-server setup) or via plugin messaging (proxy setup).
+     * (same-server setup).
      *
      * @param username     the player's username
      * @param punishmentId the punishment ID for logging

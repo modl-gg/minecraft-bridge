@@ -20,3 +20,8 @@ report-violation-threshold: # the VL to create a report for the player automatic
 # Placeholders: {player} = player username, {uuid} = player UUID
 stat-wipe-commands:
   - "clearstats {player}"
+
+# TCP query server for direct proxy communication (no players required)
+# The proxy's modl plugin connects to this port to send stat-wipe commands.
+# Authentication uses the api-key configured above.
+query-port: 25590
