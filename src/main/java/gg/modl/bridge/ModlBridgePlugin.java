@@ -4,6 +4,8 @@ import gg.modl.bridge.command.AnticheatPunishCommand;
 import gg.modl.bridge.command.AnticheatReportCommand;
 import gg.modl.bridge.config.BridgeConfig;
 import gg.modl.bridge.detection.ViolationTracker;
+import gg.modl.bridge.handler.FreezeHandler;
+import gg.modl.bridge.handler.StaffModeHandler;
 import gg.modl.bridge.hook.AntiCheatHook;
 import gg.modl.bridge.hook.GrimHook;
 import gg.modl.bridge.hook.PolarHook;
@@ -27,6 +29,8 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
     private ViolationTracker violationTracker;
     private AutoReporter autoReporter;
     private StatWipeHandler statWipeHandler;
+    private FreezeHandler freezeHandler;
+    private StaffModeHandler staffModeHandler;
     private BridgeQueryServer queryServer;
     private final List<AntiCheatHook> hooks = new ArrayList<>();
     private boolean polarAvailable = false;
@@ -110,15 +114,26 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
         // Initialize stat wipe handler
         statWipeHandler = new StatWipeHandler(this, bridgeConfig);
 
+        // Initialize freeze handler
+        freezeHandler = new FreezeHandler(this);
+        freezeHandler.register();
+
+        // Initialize staff mode handler
+        staffModeHandler = new StaffModeHandler(this, bridgeConfig, freezeHandler);
+        staffModeHandler.register();
+
         // Start TCP query server for direct proxy communication
         // Uses the API key as the shared secret for authentication
         queryServer = new BridgeQueryServer(
                 bridgeConfig.getQueryPort(),
                 bridgeConfig.getApiKey(),
                 statWipeHandler,
+                freezeHandler,
+                staffModeHandler,
                 this
         );
         queryServer.start();
+        staffModeHandler.setQueryServer(queryServer);
 
         // Check for modl plugin on same server (Spigot direct detection)
         if (Bukkit.getPluginManager().getPlugin("modl") != null) {
@@ -137,6 +152,9 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (staffModeHandler != null) {
+            staffModeHandler.shutdown();
+        }
         if (queryServer != null) {
             queryServer.shutdown();
         }
