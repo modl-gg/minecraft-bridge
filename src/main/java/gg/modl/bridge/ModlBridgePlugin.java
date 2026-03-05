@@ -1,24 +1,26 @@
 package gg.modl.bridge;
 
-import gg.modl.bridge.command.AnticheatPunishCommand;
-import gg.modl.bridge.command.AnticheatReportCommand;
+import gg.modl.bridge.command.ProxyCmdCommand;
 import gg.modl.bridge.config.BridgeConfig;
 import gg.modl.bridge.detection.ViolationTracker;
 import gg.modl.bridge.handler.FreezeHandler;
 import gg.modl.bridge.handler.StaffModeHandler;
 import gg.modl.bridge.hook.AntiCheatHook;
+import gg.modl.bridge.locale.BridgeLocaleManager;
 import gg.modl.bridge.hook.GrimHook;
 import gg.modl.bridge.hook.PolarHook;
 import gg.modl.bridge.http.BridgeHttpClient;
 import gg.modl.bridge.query.BridgeQueryServer;
 import gg.modl.bridge.report.AutoReporter;
 import gg.modl.bridge.statwipe.StatWipeHandler;
+import gg.modl.bridge.util.YamlMergeUtil;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,6 +34,7 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
     private FreezeHandler freezeHandler;
     private StaffModeHandler staffModeHandler;
     private BridgeQueryServer queryServer;
+    private BridgeLocaleManager localeManager;
     private final List<AntiCheatHook> hooks = new ArrayList<>();
     private boolean polarAvailable = false;
     private boolean grimAvailable = false;
@@ -56,7 +59,15 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+
+        // Merge new default keys into existing config files (preserves user customizations)
+        Path dataPath = getDataFolder().toPath();
+        YamlMergeUtil.mergeWithDefaults("/config.yml", dataPath.resolve("config.yml"), getLogger());
+        YamlMergeUtil.mergeWithDefaults("/staff_mode.yml", dataPath.resolve("staff_mode.yml"), getLogger());
+        reloadConfig();
+
         bridgeConfig = new BridgeConfig(getConfig());
+        localeManager = new BridgeLocaleManager(getLogger());
 
         if (!bridgeConfig.isValid()) {
             getLogger().severe("[ModlBridge] Invalid configuration! Please set your api-key and server-domain in config.yml");
@@ -80,14 +91,6 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
 
         // Register quit listener to clean up violation data
         getServer().getPluginManager().registerEvents(this, this);
-
-        // Register console commands
-        AnticheatPunishCommand punishCommand = new AnticheatPunishCommand(this, bridgeConfig, httpClient);
-        getCommand("anticheat-ban").setExecutor(punishCommand);
-        getCommand("anticheat-kick").setExecutor(punishCommand);
-
-        AnticheatReportCommand reportCommand = new AnticheatReportCommand(this, bridgeConfig, httpClient, violationTracker);
-        getCommand("anticheat-report").setExecutor(reportCommand);
 
         grimAvailable = Bukkit.getPluginManager().getPlugin("GrimAC") != null;
 
@@ -115,12 +118,13 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
         statWipeHandler = new StatWipeHandler(this, bridgeConfig);
 
         // Initialize freeze handler
-        freezeHandler = new FreezeHandler(this);
+        freezeHandler = new FreezeHandler(this, localeManager);
         freezeHandler.register();
 
         // Initialize staff mode handler
-        staffModeHandler = new StaffModeHandler(this, bridgeConfig, freezeHandler);
+        staffModeHandler = new StaffModeHandler(this, bridgeConfig, freezeHandler, localeManager);
         staffModeHandler.register();
+        freezeHandler.setStaffModeHandler(staffModeHandler);
 
         // Start TCP query server for direct proxy communication
         // Uses the API key as the shared secret for authentication
@@ -134,6 +138,10 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
         );
         queryServer.start();
         staffModeHandler.setQueryServer(queryServer);
+        freezeHandler.setQueryServer(queryServer);
+
+        // Register console command forwarder (needs queryServer)
+        getCommand("proxycmd").setExecutor(new ProxyCmdCommand(this, localeManager, queryServer));
 
         // Check for modl plugin on same server (Spigot direct detection)
         if (Bukkit.getPluginManager().getPlugin("modl") != null) {

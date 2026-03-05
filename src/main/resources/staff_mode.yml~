@@ -72,18 +72,6 @@ target_hotbar:
     lore:
       - "&7Freeze the targeted"
       - "&7player in place."
-  7:
-    item: "minecraft:lime_dye"
-    name: "&aVanish: ON"
-    action: "vanish_toggle"
-    toggle_item: "minecraft:gray_dye"
-    toggle_name: "&7Vanish: OFF"
-    lore:
-      - "&7You are currently &ahidden"
-      - "&7from all players."
-    toggle_lore:
-      - "&7You are currently &cvisible"
-      - "&7to all players."
   8:
     item: "minecraft:red_bed"
     name: "&cStop Targeting"

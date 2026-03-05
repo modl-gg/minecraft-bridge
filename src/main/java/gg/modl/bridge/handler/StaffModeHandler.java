@@ -1,6 +1,7 @@
 package gg.modl.bridge.handler;
 
 import gg.modl.bridge.config.BridgeConfig;
+import gg.modl.bridge.locale.BridgeLocaleManager;
 import gg.modl.bridge.query.BridgeQueryServer;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -40,7 +41,6 @@ import org.yaml.snakeyaml.Yaml;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
-import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -55,6 +55,7 @@ public class StaffModeHandler implements Listener {
     private final JavaPlugin plugin;
     private final BridgeConfig bridgeConfig;
     private final FreezeHandler freezeHandler;
+    private final BridgeLocaleManager localeManager;
     private BridgeQueryServer queryServer;
 
     // State tracking
@@ -74,10 +75,11 @@ public class StaffModeHandler implements Listener {
 
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("MM/dd/yyyy");
 
-    public StaffModeHandler(JavaPlugin plugin, BridgeConfig bridgeConfig, FreezeHandler freezeHandler) {
+    public StaffModeHandler(JavaPlugin plugin, BridgeConfig bridgeConfig, FreezeHandler freezeHandler, BridgeLocaleManager localeManager) {
         this.plugin = plugin;
         this.bridgeConfig = bridgeConfig;
         this.freezeHandler = freezeHandler;
+        this.localeManager = localeManager;
         loadConfig();
     }
 
@@ -110,19 +112,8 @@ public class StaffModeHandler implements Listener {
 
     @SuppressWarnings("unchecked")
     private void loadConfig() {
-        // Save default config if it doesn't exist
+        // staff_mode.yml is created/merged by YamlMergeUtil in ModlBridgePlugin.onEnable()
         File configFile = new File(plugin.getDataFolder(), "staff_mode.yml");
-        if (!configFile.exists()) {
-            try (InputStream is = getClass().getResourceAsStream("/staff_mode.yml")) {
-                if (is != null) {
-                    plugin.getDataFolder().mkdirs();
-                    Files.copy(is, configFile.toPath());
-                }
-            } catch (Exception e) {
-                plugin.getLogger().warning("[StaffMode] Failed to create default staff_mode.yml: " + e.getMessage());
-            }
-        }
-
         if (!configFile.exists()) {
             setDefaults();
             return;
@@ -194,6 +185,7 @@ public class StaffModeHandler implements Listener {
         if (raw == null) return config;
         if (raw.containsKey("enabled")) config.enabled = Boolean.TRUE.equals(raw.get("enabled"));
         if (raw.containsKey("title")) config.title = String.valueOf(raw.get("title"));
+        if (raw.containsKey("vanish")) config.vanish = String.valueOf(raw.get("vanish"));
         if (raw.containsKey("lines") && raw.get("lines") instanceof List) {
             config.lines = ((List<?>) raw.get("lines")).stream().map(o -> o == null ? "" : String.valueOf(o)).collect(Collectors.toList());
         }
@@ -244,6 +236,14 @@ public class StaffModeHandler implements Listener {
         openInv.name = "&eOpen Inventory";
         openInv.action = "open_inventory";
         targetHotbar.put(5, openInv);
+
+        HotbarItem targetVanish = new HotbarItem();
+        targetVanish.item = "minecraft:lime_dye";
+        targetVanish.name = "&aVanish: ON";
+        targetVanish.action = "vanish_toggle";
+        targetVanish.toggleItem = "minecraft:gray_dye";
+        targetVanish.toggleName = "&7Vanish: OFF";
+        targetHotbar.put(7, targetVanish);
     }
 
     // ================================
@@ -328,6 +328,8 @@ public class StaffModeHandler implements Listener {
         result = result.replace("{date}", LocalDateTime.now().format(DATE_FORMAT));
 
         boolean isVanished = vanished.contains(player.getUniqueId());
+        ScoreboardConfig config = targetMap.containsKey(player.getUniqueId()) ? targetScoreboard : staffScoreboard;
+        result = result.replace("{vanish}", isVanished ? config.vanish : "");
         result = result.replace("{vanish_status}", isVanished ? colorize("&aON") : colorize("&cOFF"));
         result = result.replace("{vanished}", isVanished ? "Vanished" : "Visible");
 
@@ -509,11 +511,15 @@ public class StaffModeHandler implements Listener {
 
     private void setupTargetHotbar(Player player) {
         player.getInventory().clear();
+        boolean isVanished = vanished.contains(player.getUniqueId());
 
         for (Map.Entry<Integer, HotbarItem> entry : targetHotbar.entrySet()) {
             int slot = entry.getKey();
             HotbarItem hotbarItem = entry.getValue();
-            ItemStack itemStack = buildItemStack(hotbarItem, false);
+
+            boolean useToggle = "vanish_toggle".equals(hotbarItem.action) && !isVanished
+                    && hotbarItem.toggleItem != null;
+            ItemStack itemStack = buildItemStack(hotbarItem, useToggle);
             if (itemStack != null && slot >= 0 && slot <= 8) {
                 player.getInventory().setItem(slot, itemStack);
             }
@@ -521,7 +527,8 @@ public class StaffModeHandler implements Listener {
     }
 
     private void updateVanishHotbarItem(Player player, boolean nowVanished) {
-        for (Map.Entry<Integer, HotbarItem> entry : staffHotbar.entrySet()) {
+        Map<Integer, HotbarItem> hotbar = targetMap.containsKey(player.getUniqueId()) ? targetHotbar : staffHotbar;
+        for (Map.Entry<Integer, HotbarItem> entry : hotbar.entrySet()) {
             HotbarItem hotbarItem = entry.getValue();
             if ("vanish_toggle".equals(hotbarItem.action)) {
                 // When vanished, show the primary (ON) state; when visible, show toggle (OFF) state
@@ -694,8 +701,14 @@ public class StaffModeHandler implements Listener {
             case "random_teleport" -> handleRandomTeleport(player);
             case "freeze_target" -> handleFreezeTarget(player);
             case "stop_target" -> {
+                UUID targetUuid = targetMap.get(uuid);
+                String targetName = "Unknown";
+                if (targetUuid != null) {
+                    Player target = Bukkit.getPlayer(targetUuid);
+                    if (target != null) targetName = target.getName();
+                }
                 clearTarget(uuid);
-                player.sendMessage(colorize("&a&lTARGET &8\u00bb &7Target cleared."));
+                player.sendMessage(localeManager.getMessage("staff_mode.target.cleared", Map.of("player", targetName)));
             }
             case "inspect_target" -> handleInspectTarget(player);
             case "open_inventory" -> handleOpenInventory(player);
@@ -706,11 +719,11 @@ public class StaffModeHandler implements Listener {
     private void toggleVanish(Player player) {
         if (vanished.contains(player.getUniqueId())) {
             unvanish(player);
-            player.sendMessage(colorize("&aYou are no longer vanished."));
+            player.sendMessage(localeManager.getMessage("staff_mode.vanish.off"));
             updateVanishHotbarItem(player, false);
         } else {
             vanish(player);
-            player.sendMessage(colorize("&aYou are now vanished."));
+            player.sendMessage(localeManager.getMessage("staff_mode.vanish.on"));
             updateVanishHotbarItem(player, true);
         }
     }
@@ -722,24 +735,26 @@ public class StaffModeHandler implements Listener {
                 .collect(Collectors.toList());
 
         if (candidates.isEmpty()) {
-            player.sendMessage(colorize("&cNo players available to teleport to."));
+            player.sendMessage(localeManager.getMessage("staff_mode.random_teleport.no_players"));
             return;
         }
 
         Player target = candidates.get(new Random().nextInt(candidates.size()));
         player.teleport(target.getLocation());
-        player.sendMessage(colorize("&aTeleported to &e" + target.getName()));
+        player.sendMessage(localeManager.getMessage("staff_mode.random_teleport.teleported", Map.of("player", target.getName())));
     }
 
     private void handleFreezeTarget(Player player) {
         UUID targetUuid = targetMap.get(player.getUniqueId());
         if (targetUuid == null) return;
+        Player target = Bukkit.getPlayer(targetUuid);
+        String targetName = target != null ? target.getName() : "Unknown";
         if (freezeHandler.isFrozen(targetUuid)) {
             freezeHandler.unfreeze(targetUuid.toString());
-            player.sendMessage(colorize("&b&lFREEZE &8\u00bb &7Target unfrozen."));
+            player.sendMessage(localeManager.getMessage("staff_mode.freeze.unfrozen", Map.of("player", targetName)));
         } else {
             freezeHandler.freeze(targetUuid.toString(), player.getUniqueId().toString());
-            player.sendMessage(colorize("&b&lFREEZE &8\u00bb &7Target frozen."));
+            player.sendMessage(localeManager.getMessage("staff_mode.freeze.frozen", Map.of("player", targetName)));
         }
     }
 
@@ -747,8 +762,11 @@ public class StaffModeHandler implements Listener {
         UUID targetUuid = targetMap.get(player.getUniqueId());
         if (targetUuid == null) return;
         Player target = Bukkit.getPlayer(targetUuid);
-        if (target != null && target.isOnline()) {
-            player.teleport(target.getLocation());
+        if (target == null || !target.isOnline()) return;
+        if (queryServer != null && queryServer.sendToAllClients("OPEN_INSPECT_MENU", player.getUniqueId().toString(), target.getName())) {
+            // Sent to proxy
+        } else {
+            Bukkit.getScheduler().runTask(plugin, () -> player.performCommand("inspect " + target.getName()));
         }
     }
 
@@ -767,9 +785,9 @@ public class StaffModeHandler implements Listener {
         Player target = Bukkit.getPlayer(targetUuid);
         if (target != null && target.isOnline()) {
             player.teleport(target.getLocation());
-            player.sendMessage(colorize("&aTeleported to &e" + target.getName()));
+            player.sendMessage(localeManager.getMessage("staff_mode.teleport.teleported", Map.of("player", target.getName())));
         } else {
-            player.sendMessage(colorize("&cTarget is no longer online."));
+            player.sendMessage(localeManager.getMessage("staff_mode.teleport.target_offline"));
         }
     }
 
@@ -853,8 +871,23 @@ public class StaffModeHandler implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onEntityInteract(PlayerInteractEntityEvent event) {
-        if (staffModeActive.contains(event.getPlayer().getUniqueId())) {
-            event.setCancelled(true);
+        Player player = event.getPlayer();
+        UUID uuid = player.getUniqueId();
+
+        if (!staffModeActive.contains(uuid)) return;
+        event.setCancelled(true);
+
+        // Check if right-clicking a player with the target selector item
+        if (event.getRightClicked() instanceof Player clicked) {
+            int slot = player.getInventory().getHeldItemSlot();
+            boolean targeting = targetMap.containsKey(uuid);
+            Map<Integer, HotbarItem> hotbar = targeting ? targetHotbar : staffHotbar;
+            HotbarItem hotbarItem = hotbar.get(slot);
+
+            if (hotbarItem != null && "target_selector".equals(hotbarItem.action)) {
+                setTarget(uuid.toString(), clicked.getUniqueId().toString());
+                player.sendMessage(localeManager.getMessage("staff_mode.target.now_targeting", Map.of("player", clicked.getName())));
+            }
         }
     }
 
@@ -891,6 +924,22 @@ public class StaffModeHandler implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         UUID uuid = player.getUniqueId();
+
+        // If the quitting player is someone's target, return the staff to staff mode
+        for (Map.Entry<UUID, UUID> entry : targetMap.entrySet()) {
+            if (entry.getValue().equals(uuid)) {
+                UUID staffUuid = entry.getKey();
+                targetMap.remove(staffUuid);
+                Player staffPlayer = Bukkit.getPlayer(staffUuid);
+                if (staffPlayer != null && staffPlayer.isOnline() && staffModeActive.contains(staffUuid)) {
+                    staffPlayer.sendMessage(localeManager.getMessage("staff_mode.target.disconnected", Map.of("player", player.getName())));
+                    setupStaffHotbar(staffPlayer);
+                    removeScoreboard(staffPlayer);
+                    createScoreboard(staffPlayer);
+                }
+            }
+        }
+
         if (staffModeActive.contains(uuid)) {
             removeScoreboard(player);
             unvanish(player);
@@ -928,6 +977,7 @@ public class StaffModeHandler implements Listener {
     private static class ScoreboardConfig {
         boolean enabled = false;
         String title = "";
+        String vanish = "";
         List<String> lines = new ArrayList<>();
     }
 

@@ -6,12 +6,6 @@ description: Bridges anticheat detections and stat-wipe commands to modl
 api-version: '1.13'
 softdepend: [GrimAC, Polar, modl]
 commands:
-  anticheat-ban:
-    description: Console-only command to issue an anticheat ban
-    usage: /<command> <player> [-lenient|-normal|-severe] [reason...]
-  anticheat-kick:
-    description: Console-only command to issue an anticheat kick
-    usage: /<command> <player> [reason...]
-  anticheat-report:
-    description: Console-only command to create a report with recent anticheat logs
-    usage: /<command> <player>
+  proxycmd:
+    description: Console-only command forwarder to the modl proxy plugin via TCP query
+    usage: /<command> <command-to-forward>

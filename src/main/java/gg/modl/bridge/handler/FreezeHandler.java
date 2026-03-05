@@ -1,5 +1,7 @@
 package gg.modl.bridge.handler;
 
+import gg.modl.bridge.locale.BridgeLocaleManager;
+import gg.modl.bridge.query.BridgeQueryServer;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -18,10 +20,22 @@ import java.util.concurrent.ConcurrentHashMap;
 public class FreezeHandler implements Listener {
 
     private final JavaPlugin plugin;
+    private final BridgeLocaleManager localeManager;
     private final Map<UUID, UUID> frozenPlayers = new ConcurrentHashMap<>(); // frozen -> staff
+    private StaffModeHandler staffModeHandler;
+    private BridgeQueryServer queryServer;
 
-    public FreezeHandler(JavaPlugin plugin) {
+    public FreezeHandler(JavaPlugin plugin, BridgeLocaleManager localeManager) {
         this.plugin = plugin;
+        this.localeManager = localeManager;
+    }
+
+    public void setStaffModeHandler(StaffModeHandler staffModeHandler) {
+        this.staffModeHandler = staffModeHandler;
+    }
+
+    public void setQueryServer(BridgeQueryServer queryServer) {
+        this.queryServer = queryServer;
     }
 
     public void register() {
@@ -36,7 +50,7 @@ public class FreezeHandler implements Listener {
         Bukkit.getScheduler().runTask(plugin, () -> {
             Player player = Bukkit.getPlayer(target);
             if (player != null) {
-                player.sendMessage("\u00a7c\u00a7lFREEZE \u00a78\u00bb \u00a77You have been frozen by a staff member. Do not disconnect.");
+                player.sendMessage(localeManager.getMessage("freeze.frozen"));
             }
         });
     }
@@ -48,7 +62,7 @@ public class FreezeHandler implements Listener {
         Bukkit.getScheduler().runTask(plugin, () -> {
             Player player = Bukkit.getPlayer(target);
             if (player != null) {
-                player.sendMessage("\u00a7a\u00a7lFREEZE \u00a78\u00bb \u00a77You have been unfrozen.");
+                player.sendMessage(localeManager.getMessage("freeze.unfrozen"));
             }
         });
     }
@@ -73,30 +87,36 @@ public class FreezeHandler implements Listener {
         Player player = event.getPlayer();
         if (!isFrozen(player.getUniqueId())) return;
         event.setCancelled(true);
-        // Redirect chat to staff
-        String message = "\u00a7b\u00a7lFROZEN \u00a78\u00bb \u00a7e" + player.getName() + "\u00a77: \u00a7f" + event.getMessage();
+        // Redirect chat to staff in staff mode
+        String message = localeManager.getMessage("freeze.chat", Map.of("player", player.getName(), "message", event.getMessage()));
         for (Player online : Bukkit.getOnlinePlayers()) {
-            if (online.hasPermission("modl.staff")) {
+            if (staffModeHandler != null && staffModeHandler.isInStaffMode(online.getUniqueId())) {
                 online.sendMessage(message);
             }
         }
+        // Also send to the frozen player so they see their own message
+        player.sendMessage(message);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onCommand(PlayerCommandPreprocessEvent event) {
         if (isFrozen(event.getPlayer().getUniqueId())) {
             event.setCancelled(true);
-            event.getPlayer().sendMessage("\u00a7cYou cannot use commands while frozen.");
+            event.getPlayer().sendMessage(localeManager.getMessage("freeze.no_commands"));
         }
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         UUID uuid = event.getPlayer().getUniqueId();
+        String playerName = event.getPlayer().getName();
         if (frozenPlayers.remove(uuid) != null) {
-            // Player logged out while frozen - this will be detected by the core plugin
-            // and broadcast via FREEZE_LOGOUT
-            plugin.getLogger().warning("Frozen player " + event.getPlayer().getName() + " logged out!");
+            plugin.getLogger().warning("Frozen player " + playerName + " logged out!");
+
+            // Notify proxy so staff across the network are alerted
+            if (queryServer != null) {
+                queryServer.sendToAllClients("FREEZE_LOGOUT", uuid.toString(), playerName);
+            }
         }
     }
 }
