@@ -1,5 +1,7 @@
 package gg.modl.bridge.locale;
 
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.ChatColor;
 import org.yaml.snakeyaml.Yaml;
 
@@ -7,14 +9,21 @@ import java.io.InputStream;
 import java.util.Collections;
 import java.util.Map;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 public class BridgeLocaleManager {
 
+    private static final Pattern MINIMESSAGE_TAG_PATTERN = Pattern.compile("<[a-zA-Z_/!#][a-zA-Z0-9_:/.#-]*>");
+
     private Map<String, Object> messages = Collections.emptyMap();
     private final Logger logger;
+    private final MiniMessage miniMessage;
+    private final LegacyComponentSerializer sectionSerializer;
 
     public BridgeLocaleManager(Logger logger) {
         this.logger = logger;
+        this.miniMessage = MiniMessage.builder().strict(false).build();
+        this.sectionSerializer = LegacyComponentSerializer.legacySection();
         load();
     }
 
@@ -35,6 +44,14 @@ public class BridgeLocaleManager {
     }
 
     /**
+     * Check if text contains MiniMessage tags.
+     */
+    public static boolean isMiniMessage(String text) {
+        if (text == null || text.isEmpty()) return false;
+        return MINIMESSAGE_TAG_PATTERN.matcher(text).find();
+    }
+
+    /**
      * Get a message by dot-path key with placeholder replacement.
      *
      * @param key          dot-separated path (e.g. "staff_mode.target.cleared")
@@ -51,7 +68,7 @@ public class BridgeLocaleManager {
                 raw = raw.replace("{" + entry.getKey() + "}", entry.getValue());
             }
         }
-        return ChatColor.translateAlternateColorCodes('&', raw);
+        return colorize(raw);
     }
 
     /**
@@ -59,6 +76,18 @@ public class BridgeLocaleManager {
      */
     public String getMessage(String key) {
         return getMessage(key, null);
+    }
+
+    /**
+     * Colorize a string, auto-detecting MiniMessage or legacy &amp; codes.
+     * Returns a legacy §-encoded string suitable for Bukkit APIs.
+     */
+    public String colorize(String text) {
+        if (text == null || text.isEmpty()) return text;
+        if (isMiniMessage(text)) {
+            return sectionSerializer.serialize(miniMessage.deserialize(text));
+        }
+        return ChatColor.translateAlternateColorCodes('&', text);
     }
 
     @SuppressWarnings("unchecked")

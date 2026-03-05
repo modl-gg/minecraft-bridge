@@ -957,7 +957,7 @@ public class StaffModeHandler implements Listener {
     // ================================
 
     private String colorize(String text) {
-        return ChatColor.translateAlternateColorCodes('&', text);
+        return localeManager.colorize(text);
     }
 
     // ================================
