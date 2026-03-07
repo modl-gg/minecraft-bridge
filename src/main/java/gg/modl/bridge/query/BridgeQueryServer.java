@@ -18,8 +18,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.logging.Logger;
 
 @RequiredArgsConstructor
@@ -35,12 +37,30 @@ public class BridgeQueryServer {
     private final JavaPlugin plugin;
     private final Map<String, Channel> connectedServers = new ConcurrentHashMap<>();
     private final Set<Channel> authenticatedChannels = ConcurrentHashMap.newKeySet();
+    private final Queue<byte[]> pendingMessages = new ConcurrentLinkedQueue<>();
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
 
     public void addAuthenticatedChannel(Channel channel) {
         authenticatedChannels.add(channel);
+        flushPendingMessages();
+    }
+
+    private void flushPendingMessages() {
+        byte[] data;
+        int flushed = 0;
+        while ((data = pendingMessages.poll()) != null) {
+            for (Channel ch : authenticatedChannels) {
+                if (ch.isActive()) {
+                    sendRaw(ch, data);
+                }
+            }
+            flushed++;
+        }
+        if (flushed > 0) {
+            plugin.getLogger().info("Flushed " + flushed + " pending message(s) to newly connected client");
+        }
     }
 
     public void unregisterServer(Channel channel) {
@@ -56,13 +76,19 @@ public class BridgeQueryServer {
 
     /**
      * Send a typed message to all connected proxy clients.
-     * @return true if sent to at least one client
+     * If no clients are connected, the message is queued and will be flushed
+     * when a client connects.
+     * @return true if sent to at least one client, false if queued for later
      */
     public boolean sendToAllClients(String action, String... args) {
-        if (authenticatedChannels.isEmpty()) return false;
-
         byte[] data = buildMessage(action, args);
         if (data == null) return false;
+
+        if (authenticatedChannels.isEmpty()) {
+            pendingMessages.add(data);
+            plugin.getLogger().info("No connected clients, queued " + action + " for delivery on connect");
+            return false;
+        }
 
         boolean sent = false;
         for (Channel ch : authenticatedChannels) {
@@ -70,6 +96,11 @@ public class BridgeQueryServer {
                 sendRaw(ch, data);
                 sent = true;
             }
+        }
+
+        if (!sent) {
+            pendingMessages.add(data);
+            plugin.getLogger().info("No active clients, queued " + action + " for delivery on reconnect");
         }
         return sent;
     }
@@ -117,7 +148,7 @@ public class BridgeQueryServer {
             DataOutputStream dos = new DataOutputStream(baos);
             dos.writeUTF(action);
             for (String arg : args) {
-                dos.writeUTF(arg);
+                dos.writeUTF(arg != null ? arg : "");
             }
             dos.flush();
             return baos.toByteArray();

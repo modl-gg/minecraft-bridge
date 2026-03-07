@@ -154,12 +154,9 @@ public class ModlBridgePlugin extends JavaPlugin implements Listener {
         getLogger().info("Using TCP bridge for ticket creation");
         return (creatorUuid, creatorName, type, subject, description,
                 reportedPlayerUuid, reportedPlayerName, tagsJoined, priority, createdServer) -> {
-            boolean sent = queryServer.sendToAllClients("CREATE_REPORT",
+            queryServer.sendToAllClients("CREATE_REPORT",
                     creatorUuid, creatorName, type, subject, description,
                     reportedPlayerUuid, reportedPlayerName, tagsJoined, priority, createdServer);
-            if (!sent) {
-                getLogger().warning("No connected proxy clients to send CREATE_REPORT");
-            }
         };
     }
 
