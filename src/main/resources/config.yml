@@ -1,10 +1,18 @@
-api-key: "your-api-key-here"
-server-domain: "yourserver.modl.gg"
-testing-mode: false
+# modl-bridge configuration file
+# This plugin is designed to bridge spigot-only functions to modl plugin,
+# since all features on the main modl plugin must support Bungee, Spigot, and Velocity.
+
+api-key: "your-api-key-here" # this is used for authentication in TCP queries.
 debug: false
 
-issuer-name: "Anti-cheat"
-anticheat-name: "Anti-cheat"  # Display name used in report subjects (e.g. "[Anti-cheat] Speed - Player")
+# TCP query server for direct proxy communication (no players required)
+# The proxy's modl plugin connects to this port to send stat-wipe commands.
+# Authentication uses the api-key configured above.
+# Set to false if both plugins run on the same Spigot server (reflection is used instead).
+query-enabled: true
+query-port: 25590
+
+anticheat-name: "Anti-cheat"  # Display name used in report subjects and as the ticket creator name
 server-name: "Server 1"
 
 ban-type-ordinal: 14    # Punishment type ordinal for /anticheat-ban (14 = Cheating)
@@ -20,8 +28,3 @@ report-violation-threshold: # the VL to create a report for the player automatic
 # Placeholders: {player} = player username, {uuid} = player UUID
 stat-wipe-commands:
   - "clearstats {player}"
-
-# TCP query server for direct proxy communication (no players required)
-# The proxy's modl plugin connects to this port to send stat-wipe commands.
-# Authentication uses the api-key configured above.
-query-port: 25590

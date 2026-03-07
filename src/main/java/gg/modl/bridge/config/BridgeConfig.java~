@@ -8,10 +8,13 @@ import java.util.List;
 
 @RequiredArgsConstructor
 public class BridgeConfig {
+
     private static final String KEY_API_KEY = "api-key";
     private static final String KEY_DEBUG = "debug";
     private static final String KEY_ANTICHEAT_NAME = "anticheat-name";
     private static final String KEY_SERVER_NAME = "server-name";
+    private static final String KEY_BAN_TYPE_ORDINAL = "ban-type-ordinal";
+    private static final String KEY_KICK_TYPE_ORDINAL = "kick-type-ordinal";
     private static final String KEY_REPORT_COOLDOWN = "report-cooldown";
     private static final String KEY_THRESHOLD_DEFAULT = "report-violation-threshold.default";
     private static final String KEY_THRESHOLD_CHECKS_PREFIX = "report-violation-threshold.checks.";
@@ -20,6 +23,8 @@ public class BridgeConfig {
     private static final String KEY_QUERY_PORT = "query-port";
     private static final String PLACEHOLDER_API_KEY = "your-api-key-here";
 
+    private static final int DEFAULT_BAN_TYPE_ORDINAL = 14;
+    private static final int DEFAULT_KICK_TYPE_ORDINAL = 0;
     private static final int DEFAULT_REPORT_COOLDOWN = 60;
     private static final int DEFAULT_VIOLATION_THRESHOLD = 10;
     private static final int DEFAULT_QUERY_PORT = 25590;
@@ -40,6 +45,14 @@ public class BridgeConfig {
 
     public String getServerName() {
         return config.getString(KEY_SERVER_NAME, "Server 1");
+    }
+
+    public int getBanTypeOrdinal() {
+        return config.getInt(KEY_BAN_TYPE_ORDINAL, DEFAULT_BAN_TYPE_ORDINAL);
+    }
+
+    public int getKickTypeOrdinal() {
+        return config.getInt(KEY_KICK_TYPE_ORDINAL, DEFAULT_KICK_TYPE_ORDINAL);
     }
 
     public int getReportCooldown() {

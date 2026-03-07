@@ -1,22 +1,20 @@
 package gg.modl.bridge.statwipe;
 
 import gg.modl.bridge.config.BridgeConfig;
+import lombok.RequiredArgsConstructor;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.List;
 import java.util.logging.Logger;
 
+@RequiredArgsConstructor
 public class StatWipeHandler {
+    private static final String PLAYER_PLACEHOLDER = "{player}";
+    private static final String UUID_PLACEHOLDER = "{uuid}";
+
     private final JavaPlugin plugin;
     private final BridgeConfig config;
-    private final Logger logger;
-
-    public StatWipeHandler(JavaPlugin plugin, BridgeConfig config) {
-        this.plugin = plugin;
-        this.config = config;
-        this.logger = plugin.getLogger();
-    }
 
     /**
      * Execute stat-wipe commands for the given player.
@@ -28,31 +26,33 @@ public class StatWipeHandler {
      * @return true if all commands executed successfully
      */
     public boolean execute(String username, String uuid, String punishmentId) {
+        Logger logger = plugin.getLogger();
         List<String> commands = config.getStatWipeCommands();
+
         if (commands.isEmpty()) {
-            logger.warning("[StatWipe] No stat-wipe-commands configured in config.yml");
+            logger.warning("No stat-wipe-commands configured in config.yml");
             return false;
         }
 
         boolean allSuccess = true;
         for (String template : commands) {
             String command = template
-                    .replace("{player}", username)
-                    .replace("{uuid}", uuid);
+                    .replace(PLAYER_PLACEHOLDER, username)
+                    .replace(UUID_PLACEHOLDER, uuid);
             try {
                 if (config.isDebug()) {
-                    logger.info("[StatWipe] Dispatching command: " + command);
+                    logger.info("Dispatching command: " + command);
                 }
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
             } catch (Exception e) {
-                logger.severe("[StatWipe] Failed to execute command '" + command + "': " + e.getMessage());
+                logger.severe("Failed to execute command '" + command + "': " + e.getMessage());
                 allSuccess = false;
             }
         }
 
         if (allSuccess) {
-            logger.info("[StatWipe] Executed " + commands.size() + " stat-wipe command(s) for " + username +
-                    " (punishment: " + punishmentId + ")");
+            logger.info("Executed " + commands.size() + " stat-wipe command(s) for " + username
+                    + " (punishment: " + punishmentId + ")");
         }
         return allSuccess;
     }

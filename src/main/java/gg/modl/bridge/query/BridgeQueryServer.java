@@ -11,6 +11,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
+import lombok.RequiredArgsConstructor;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.ByteArrayOutputStream;
@@ -21,33 +22,22 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
+@RequiredArgsConstructor
 public class BridgeQueryServer {
+    private static final int MAX_FRAME_LENGTH = 65536;
+    private static final int LENGTH_FIELD_LENGTH = 4;
+
     private final int port;
     private final String secret;
     private final StatWipeHandler statWipeHandler;
     private final FreezeHandler freezeHandler;
     private final StaffModeHandler staffModeHandler;
     private final JavaPlugin plugin;
-    private final Logger logger;
     private final Map<String, Channel> connectedServers = new ConcurrentHashMap<>();
     private final Set<Channel> authenticatedChannels = ConcurrentHashMap.newKeySet();
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
-
-    public BridgeQueryServer(int port, String secret, StatWipeHandler statWipeHandler, FreezeHandler freezeHandler, StaffModeHandler staffModeHandler, JavaPlugin plugin) {
-        this.port = port;
-        this.secret = secret;
-        this.statWipeHandler = statWipeHandler;
-        this.freezeHandler = freezeHandler;
-        this.staffModeHandler = staffModeHandler;
-        this.plugin = plugin;
-        this.logger = plugin.getLogger();
-    }
-
-    public void registerServer(String serverName, Channel channel) {
-        connectedServers.put(serverName, channel);
-    }
 
     public void addAuthenticatedChannel(Channel channel) {
         authenticatedChannels.add(channel);
@@ -58,24 +48,10 @@ public class BridgeQueryServer {
         authenticatedChannels.remove(channel);
     }
 
-    public void relayMessage(String targetServer, byte[] data) {
-        Channel channel = connectedServers.get(targetServer);
-        if (channel != null && channel.isActive()) {
-            ByteBuf buf = channel.alloc().buffer();
-            buf.writeBytes(data);
-            channel.writeAndFlush(buf);
-        }
-    }
-
     public void broadcastMessage(byte[] data, Channel except) {
-        for (Map.Entry<String, Channel> entry : connectedServers.entrySet()) {
-            Channel ch = entry.getValue();
-            if (ch.isActive() && !ch.equals(except)) {
-                ByteBuf buf = ch.alloc().buffer();
-                buf.writeBytes(data);
-                ch.writeAndFlush(buf);
-            }
-        }
+        connectedServers.values().stream()
+                .filter(ch -> ch.isActive() && !ch.equals(except))
+                .forEach(ch -> sendRaw(ch, data));
     }
 
     /**
@@ -85,30 +61,17 @@ public class BridgeQueryServer {
     public boolean sendToAllClients(String action, String... args) {
         if (authenticatedChannels.isEmpty()) return false;
 
-        try {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            DataOutputStream dos = new DataOutputStream(baos);
-            dos.writeUTF(action);
-            for (String arg : args) {
-                dos.writeUTF(arg);
-            }
-            dos.flush();
-            byte[] data = baos.toByteArray();
+        byte[] data = buildMessage(action, args);
+        if (data == null) return false;
 
-            boolean sent = false;
-            for (Channel ch : authenticatedChannels) {
-                if (ch.isActive()) {
-                    ByteBuf buf = ch.alloc().buffer();
-                    buf.writeBytes(data);
-                    ch.writeAndFlush(buf);
-                    sent = true;
-                }
+        boolean sent = false;
+        for (Channel ch : authenticatedChannels) {
+            if (ch.isActive()) {
+                sendRaw(ch, data);
+                sent = true;
             }
-            return sent;
-        } catch (IOException e) {
-            logger.warning("[ModlBridge] Failed to send " + action + " to clients: " + e.getMessage());
-            return false;
         }
+        return sent;
     }
 
     public boolean hasConnectedClients() {
@@ -126,22 +89,48 @@ public class BridgeQueryServer {
                     @Override
                     protected void initChannel(SocketChannel ch) {
                         ch.pipeline().addLast(
-                                new LengthFieldBasedFrameDecoder(65536, 0, 4, 0, 4),
-                                new LengthFieldPrepender(4),
-                                new BridgeQueryHandler(secret, statWipeHandler, freezeHandler, staffModeHandler, BridgeQueryServer.this, plugin)
+                                new LengthFieldBasedFrameDecoder(MAX_FRAME_LENGTH, 0, LENGTH_FIELD_LENGTH, 0, LENGTH_FIELD_LENGTH),
+                                new LengthFieldPrepender(LENGTH_FIELD_LENGTH),
+                                new BridgeQueryHandler(secret, statWipeHandler, freezeHandler,
+                                    staffModeHandler, BridgeQueryServer.this, plugin)
                         );
                     }
                 });
 
         try {
             serverChannel = bootstrap.bind(port).sync().channel();
-            logger.info("[ModlBridge] Query server started on port " + port);
+            plugin.getLogger().info("Query server started on port " + port);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            logger.severe("[ModlBridge] Interrupted while starting query server on port " + port);
+            plugin.getLogger().severe("Interrupted while starting query server on port " + port);
         } catch (Exception e) {
-            logger.severe("[ModlBridge] Failed to start query server on port " + port + ": " + e.getMessage());
+            plugin.getLogger().severe("Failed to start query server on port " + port + ": " + e.getMessage());
         }
+    }
+
+    /**
+     * Build a message byte array with the given action and arguments as UTF strings.
+     */
+    byte[] buildMessage(String action, String... args) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream dos = new DataOutputStream(baos);
+            dos.writeUTF(action);
+            for (String arg : args) {
+                dos.writeUTF(arg);
+            }
+            dos.flush();
+            return baos.toByteArray();
+        } catch (IOException e) {
+            plugin.getLogger().warning("Failed to build message for " + action + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    private void sendRaw(Channel channel, byte[] data) {
+        ByteBuf buf = channel.alloc().buffer(data.length);
+        buf.writeBytes(data);
+        channel.writeAndFlush(buf);
     }
 
     public void shutdown() {

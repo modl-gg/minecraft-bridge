@@ -1,8 +1,8 @@
 name: modl-bridge
 main: gg.modl.bridge.ModlBridgePlugin
 version: '1.0.1'
-author: modl
-description: Bridges anticheat detections and stat-wipe commands to modl
+author: tigerbong, byteful
+description: Bridges spigot-only features to the modl plugin.
 api-version: '1.13'
 softdepend: [GrimAC, Polar, modl]
 commands:

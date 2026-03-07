@@ -2,6 +2,7 @@ package gg.modl.bridge.command;
 
 import gg.modl.bridge.locale.BridgeLocaleManager;
 import gg.modl.bridge.query.BridgeQueryServer;
+import lombok.RequiredArgsConstructor;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -9,17 +10,16 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.Map;
+
+@RequiredArgsConstructor
 public class ProxyCmdCommand implements CommandExecutor {
+    private static final String MODL_PLUGIN_NAME = "modl";
+    private static final String PROXY_CMD_ACTION = "PROXY_CMD";
 
     private final JavaPlugin plugin;
     private final BridgeLocaleManager localeManager;
     private final BridgeQueryServer queryServer;
-
-    public ProxyCmdCommand(JavaPlugin plugin, BridgeLocaleManager localeManager, BridgeQueryServer queryServer) {
-        this.plugin = plugin;
-        this.localeManager = localeManager;
-        this.queryServer = queryServer;
-    }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
@@ -28,18 +28,16 @@ public class ProxyCmdCommand implements CommandExecutor {
             return true;
         }
 
-        if (args.length < 1) {
+        if (args.length == 0) {
             sender.sendMessage(localeManager.getMessage("command.proxycmd.usage"));
             return true;
         }
 
-        // Check if modl plugin is installed locally on Spigot (not supported — use proxy)
-        if (Bukkit.getPluginManager().getPlugin("modl") != null) {
+        if (Bukkit.getPluginManager().getPlugin(MODL_PLUGIN_NAME) != null) {
             sender.sendMessage(localeManager.getMessage("command.proxycmd.modl_on_spigot"));
             return true;
         }
 
-        // Check if connected to modl plugin via TCP query
         if (!queryServer.hasConnectedClients()) {
             sender.sendMessage(localeManager.getMessage("command.proxycmd.not_connected"));
             return true;
@@ -47,10 +45,9 @@ public class ProxyCmdCommand implements CommandExecutor {
 
         String fullCommand = String.join(" ", args);
 
-        boolean sent = queryServer.sendToAllClients("PROXY_CMD", fullCommand);
-        if (sent) {
-            plugin.getLogger().info("[ModlBridge] Forwarded command to proxy: " + fullCommand);
-            sender.sendMessage(localeManager.getMessage("command.proxycmd.sent", java.util.Map.of("command", fullCommand)));
+        if (queryServer.sendToAllClients(PROXY_CMD_ACTION, fullCommand)) {
+            plugin.getLogger().info("Forwarded command to proxy: " + fullCommand);
+            sender.sendMessage(localeManager.getMessage("command.proxycmd.sent", Map.of("command", fullCommand)));
         } else {
             sender.sendMessage(localeManager.getMessage("command.proxycmd.failed"));
         }

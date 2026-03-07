@@ -1,24 +1,26 @@
-package gg.modl.bridge.detection;
+package gg.modl.bridge.reporter.detection;
 
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ViolationTracker {
-
     private static final int MAX_RECORDS_PER_PLAYER = 200;
     private static final long RECORD_TTL_MS = 10 * 60 * 1000L; // 10 minutes
+    private static final long CLEANUP_INTERVAL_TICKS = 1200L; // 60 seconds
 
-    private final ConcurrentHashMap<UUID, List<ViolationRecord>> records = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Deque<ViolationRecord>> records = new ConcurrentHashMap<>();
     private BukkitTask cleanupTask;
 
     public void startCleanupTask(JavaPlugin plugin) {
-        // Run cleanup every 60 seconds (1200 ticks)
-        cleanupTask = plugin.getServer().getScheduler().runTaskTimerAsynchronously(plugin, this::cleanup, 1200L, 1200L);
+        cleanupTask = plugin.getServer().getScheduler().runTaskTimerAsynchronously(
+                plugin, this::cleanup, CLEANUP_INTERVAL_TICKS, CLEANUP_INTERVAL_TICKS);
     }
 
     public void stopCleanupTask() {
@@ -29,17 +31,17 @@ public class ViolationTracker {
     }
 
     public void addViolation(UUID uuid, DetectionSource source, String checkName, String verbose) {
-        List<ViolationRecord> playerRecords = records.computeIfAbsent(uuid, k -> new ArrayList<>());
+        Deque<ViolationRecord> playerRecords = records.computeIfAbsent(uuid, k -> new ArrayDeque<>());
         synchronized (playerRecords) {
-            playerRecords.add(new ViolationRecord(source, checkName, verbose));
+            playerRecords.addLast(new ViolationRecord(source, checkName, verbose));
             if (playerRecords.size() > MAX_RECORDS_PER_PLAYER) {
-                playerRecords.remove(0);
+                playerRecords.removeFirst();
             }
         }
     }
 
     public List<ViolationRecord> getRecords(UUID uuid) {
-        List<ViolationRecord> playerRecords = records.get(uuid);
+        Deque<ViolationRecord> playerRecords = records.get(uuid);
         if (playerRecords == null) return List.of();
         synchronized (playerRecords) {
             return new ArrayList<>(playerRecords);
@@ -47,12 +49,16 @@ public class ViolationTracker {
     }
 
     public int getViolationCount(UUID uuid, DetectionSource source, String checkName) {
-        List<ViolationRecord> playerRecords = records.get(uuid);
+        Deque<ViolationRecord> playerRecords = records.get(uuid);
         if (playerRecords == null) return 0;
         synchronized (playerRecords) {
-            return (int) playerRecords.stream()
-                    .filter(r -> r.getSource() == source && r.getCheckName().equalsIgnoreCase(checkName))
-                    .count();
+            int count = 0;
+            for (ViolationRecord r : playerRecords) {
+                if (r.getSource() == source && r.getCheckName().equalsIgnoreCase(checkName)) {
+                    count++;
+                }
+            }
+            return count;
         }
     }
 
@@ -62,14 +68,13 @@ public class ViolationTracker {
 
     private void cleanup() {
         long cutoff = System.currentTimeMillis() - RECORD_TTL_MS;
-        for (var entry : records.entrySet()) {
-            List<ViolationRecord> list = entry.getValue();
+        records.forEach((uuid, list) -> {
             synchronized (list) {
                 list.removeIf(r -> r.getTimestamp() < cutoff);
             }
-            // Don't remove empty entries here — resetPlayer handles that on quit.
+            // Don't remove empty entries here, resetPlayer handles that on quit.
             // Removing here races with addViolation/getViolationCount since
             // computeIfAbsent can return a list that's about to be removed.
-        }
+        });
     }
 }

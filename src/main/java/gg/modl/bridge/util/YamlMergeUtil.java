@@ -2,10 +2,8 @@ package gg.modl.bridge.util;
 
 import org.yaml.snakeyaml.Yaml;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,6 +27,8 @@ import java.util.logging.Logger;
  */
 public final class YamlMergeUtil {
 
+    private static final String LOG_PREFIX = "[modl-bridge] ";
+
     private YamlMergeUtil() {}
 
     /**
@@ -49,54 +49,39 @@ public final class YamlMergeUtil {
     public static void mergeWithDefaults(String jarResourcePath, Path externalFile, Logger logger) {
         try {
             if (!Files.exists(externalFile)) {
-                try (InputStream jarStream = YamlMergeUtil.class.getResourceAsStream(jarResourcePath)) {
-                    if (jarStream == null) {
-                        logger.warning("[modl-bridge] JAR resource not found: " + jarResourcePath);
-                        return;
-                    }
-                    Files.createDirectories(externalFile.getParent());
-                    Files.copy(jarStream, externalFile);
-                }
+                copyResourceToFile(jarResourcePath, externalFile, logger);
                 return;
             }
 
-            // Read JAR default as raw text
-            String jarText;
-            try (InputStream jarStream = YamlMergeUtil.class.getResourceAsStream(jarResourcePath)) {
-                if (jarStream == null) {
-                    logger.warning("[modl-bridge] JAR resource not found: " + jarResourcePath);
-                    return;
-                }
-                jarText = readStream(jarStream);
+            String jarText = readJarResource(jarResourcePath);
+            if (jarText == null) {
+                logger.warning(LOG_PREFIX + "JAR resource not found: " + jarResourcePath);
+                return;
             }
-            // Normalize line endings
-            jarText = jarText.replace("\r\n", "\n").replace("\r", "\n");
+            jarText = normalizeLineEndings(jarText);
 
-            // Parse both files into maps to compare keys
             Yaml yaml = new Yaml();
 
             Map<Object, Object> defaults;
             try {
                 defaults = yaml.load(jarText);
             } catch (Exception e) {
-                logger.warning("[modl-bridge] Failed to parse JAR default " + jarResourcePath + ", skipping merge");
+                logger.warning(LOG_PREFIX + "Failed to parse JAR default " + jarResourcePath + ", skipping merge");
                 return;
             }
             if (defaults == null) return;
 
-            String userText = Files.readString(externalFile, StandardCharsets.UTF_8);
-            userText = userText.replace("\r\n", "\n").replace("\r", "\n");
+            String userText = normalizeLineEndings(Files.readString(externalFile, StandardCharsets.UTF_8));
 
             Map<Object, Object> userValues;
             try {
                 userValues = yaml.load(userText);
             } catch (Exception e) {
-                logger.warning("[modl-bridge] Failed to parse " + externalFile.getFileName() + ", skipping merge: " + e.getMessage());
+                logger.warning(LOG_PREFIX + "Failed to parse " + externalFile.getFileName() + ", skipping merge: " + e.getMessage());
                 return;
             }
             if (userValues == null) userValues = new LinkedHashMap<>();
 
-            // Recursively find all missing key paths (at the shallowest missing level)
             List<String> missingPaths = new ArrayList<>();
             collectMissingPaths(defaults, userValues, "", missingPaths);
             if (missingPaths.isEmpty()) return;
@@ -106,16 +91,13 @@ public final class YamlMergeUtil {
 
             int inserted = 0;
             for (String path : missingPaths) {
-                // Extract the raw section text from the JAR default
                 String rawSection = extractSectionByPath(jarLines, path);
                 if (rawSection == null) continue;
 
-                // Find where to insert in the user file
                 int insertAt = findInsertionPoint(userLines, path);
                 if (insertAt < 0) continue;
 
                 List<String> newLines = new ArrayList<>(Arrays.asList(rawSection.split("\n", -1)));
-                // Remove trailing empty line from split
                 while (!newLines.isEmpty() && newLines.get(newLines.size() - 1).isEmpty()) {
                     newLines.remove(newLines.size() - 1);
                 }
@@ -126,12 +108,33 @@ public final class YamlMergeUtil {
 
             if (inserted > 0) {
                 Files.writeString(externalFile, String.join("\n", userLines), StandardCharsets.UTF_8);
-                logger.info("[modl-bridge] Merged " + inserted + " new section(s) into " + externalFile.getFileName());
+                logger.info(LOG_PREFIX + "Merged " + inserted + " new section(s) into " + externalFile.getFileName());
             }
 
         } catch (IOException e) {
-            logger.warning("[modl-bridge] Failed to merge defaults for " + externalFile.getFileName() + ": " + e.getMessage());
+            logger.warning(LOG_PREFIX + "Failed to merge defaults for " + externalFile.getFileName() + ": " + e.getMessage());
         }
+    }
+
+    private static void copyResourceToFile(String jarResourcePath, Path externalFile, Logger logger) throws IOException {
+        try (InputStream jarStream = YamlMergeUtil.class.getResourceAsStream(jarResourcePath)) {
+            if (jarStream == null) {
+                logger.warning(LOG_PREFIX + "JAR resource not found: " + jarResourcePath);
+                return;
+            }
+            Files.createDirectories(externalFile.getParent());
+            Files.copy(jarStream, externalFile);
+        }
+    }
+
+    private static String readJarResource(String jarResourcePath) throws IOException {
+        try (InputStream jarStream = YamlMergeUtil.class.getResourceAsStream(jarResourcePath)) {
+            return jarStream != null ? new String(jarStream.readAllBytes(), StandardCharsets.UTF_8) : null;
+        }
+    }
+
+    private static String normalizeLineEndings(String text) {
+        return text.replace("\r\n", "\n").replace("\r", "\n");
     }
 
     /**
@@ -192,13 +195,11 @@ public final class YamlMergeUtil {
         String[] parts = path.split("\\.");
 
         if (parts.length == 1) {
-            // Top-level key: append at end, before trailing blank lines
             int end = lines.size();
             while (end > 0 && lines.get(end - 1).trim().isEmpty()) end--;
             return end;
         }
 
-        // Navigate to the direct parent section
         int searchFrom = 0;
         int expectedIndent = 0;
 
@@ -208,16 +209,13 @@ public final class YamlMergeUtil {
 
             int childIndent = detectChildIndent(lines, keyLine, expectedIndent);
             if (childIndent < 0) {
-                // Parent has no children yet — insert right after the key line
                 return keyLine + 1;
             }
 
             if (p < parts.length - 2) {
-                // Intermediate parent — navigate deeper
                 searchFrom = keyLine + 1;
                 expectedIndent = childIndent;
             } else {
-                // Direct parent — find the end of its children
                 return findSectionEnd(lines, keyLine, expectedIndent);
             }
         }
@@ -232,7 +230,7 @@ public final class YamlMergeUtil {
         for (int i = sectionStart + 1; i < lines.size(); i++) {
             String line = lines.get(i);
             String trimmed = line.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+            if (isBlankOrComment(trimmed)) continue;
             if (getIndent(line) <= sectionIndent) break;
             lastContentLine = i;
         }
@@ -246,7 +244,7 @@ public final class YamlMergeUtil {
         for (int i = from; i < lines.size(); i++) {
             String line = lines.get(i);
             String trimmed = line.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+            if (isBlankOrComment(trimmed)) continue;
 
             int indent = getIndent(line);
             if (indent < expectedIndent) return -1;
@@ -277,7 +275,7 @@ public final class YamlMergeUtil {
         for (int i = parentLine + 1; i < lines.size(); i++) {
             String line = lines.get(i);
             String trimmed = line.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+            if (isBlankOrComment(trimmed)) continue;
             int indent = getIndent(line);
             if (indent <= parentIndent) return -1;
             return indent;
@@ -293,7 +291,7 @@ public final class YamlMergeUtil {
         while (endLine < lines.size()) {
             String line = lines.get(endLine);
             String trimmed = line.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+            if (isBlankOrComment(trimmed)) {
                 endLine++;
                 continue;
             }
@@ -312,24 +310,11 @@ public final class YamlMergeUtil {
         return sb.toString();
     }
 
-    private static int getIndent(String line) {
-        int indent = 0;
-        for (int i = 0; i < line.length(); i++) {
-            if (line.charAt(i) == ' ') indent++;
-            else break;
-        }
-        return indent;
+    private static boolean isBlankOrComment(String trimmedLine) {
+        return trimmedLine.isEmpty() || trimmedLine.charAt(0) == '#';
     }
 
-    private static String readStream(InputStream stream) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
-            char[] buffer = new char[4096];
-            int read;
-            while ((read = reader.read(buffer)) != -1) {
-                sb.append(buffer, 0, read);
-            }
-        }
-        return sb.toString();
+    private static int getIndent(String line) {
+        return line.length() - line.stripLeading().length();
     }
 }

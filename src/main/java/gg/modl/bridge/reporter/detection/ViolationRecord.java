@@ -1,11 +1,13 @@
-package gg.modl.bridge.detection;
+package gg.modl.bridge.reporter.detection;
+
+import lombok.Getter;
 
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
+@Getter
 public class ViolationRecord {
-
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss")
             .withZone(ZoneId.systemDefault());
 
@@ -19,22 +21,6 @@ public class ViolationRecord {
         this.checkName = checkName;
         this.verbose = verbose;
         this.timestamp = System.currentTimeMillis();
-    }
-
-    public DetectionSource getSource() {
-        return source;
-    }
-
-    public String getCheckName() {
-        return checkName;
-    }
-
-    public String getVerbose() {
-        return verbose;
-    }
-
-    public long getTimestamp() {
-        return timestamp;
     }
 
     public String getFormattedTimestamp() {

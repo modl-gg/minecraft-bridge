@@ -6,17 +6,24 @@ import gg.modl.bridge.statwipe.StatWipeHandler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import lombok.RequiredArgsConstructor;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.UUID;
 import java.util.logging.Logger;
 
+@RequiredArgsConstructor
 public class BridgeQueryHandler extends ChannelInboundHandlerAdapter {
     private static final byte[] MAGIC = "modl".getBytes(StandardCharsets.US_ASCII);
+    private static final int MIN_HANDSHAKE_BYTES = 6;
+    private static final byte AUTH_FAILURE = 0x00;
+    private static final byte AUTH_SUCCESS = 0x01;
 
     private final String secret;
     private final StatWipeHandler statWipeHandler;
@@ -24,18 +31,8 @@ public class BridgeQueryHandler extends ChannelInboundHandlerAdapter {
     private final StaffModeHandler staffModeHandler;
     private final BridgeQueryServer queryServer;
     private final JavaPlugin plugin;
-    private final Logger logger;
-    private boolean authenticated = false;
 
-    public BridgeQueryHandler(String secret, StatWipeHandler statWipeHandler, FreezeHandler freezeHandler, StaffModeHandler staffModeHandler, BridgeQueryServer queryServer, JavaPlugin plugin) {
-        this.secret = secret;
-        this.statWipeHandler = statWipeHandler;
-        this.freezeHandler = freezeHandler;
-        this.staffModeHandler = staffModeHandler;
-        this.queryServer = queryServer;
-        this.plugin = plugin;
-        this.logger = plugin.getLogger();
-    }
+    private boolean authenticated = false;
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
@@ -52,44 +49,41 @@ public class BridgeQueryHandler extends ChannelInboundHandlerAdapter {
     }
 
     private void handleHandshake(ChannelHandlerContext ctx, ByteBuf buf) {
-        // Expect: [4 bytes: "modl" magic] [UTF: secret]
-        if (buf.readableBytes() < 6) {
-            logger.warning("[ModlBridge] Query handshake too short from " + ctx.channel().remoteAddress());
+        // expect [4 bytes: "modl" magic] [UTF: secret]
+        if (buf.readableBytes() < MIN_HANDSHAKE_BYTES) {
+            plugin.getLogger().warning("Query handshake too short from " + ctx.channel().remoteAddress());
             ctx.close();
             return;
         }
 
-        byte[] magic = new byte[4];
+        byte[] magic = new byte[MAGIC.length];
         buf.readBytes(magic);
 
         if (!Arrays.equals(magic, MAGIC)) {
-            logger.warning("[ModlBridge] Query handshake failed: invalid magic bytes from " + ctx.channel().remoteAddress());
+            plugin.getLogger().warning("Query handshake failed: invalid magic bytes from " + ctx.channel().remoteAddress());
             ctx.close();
             return;
         }
 
-        byte[] remaining = new byte[buf.readableBytes()];
-        buf.readBytes(remaining);
-
         try {
-            DataInputStream in = new DataInputStream(new ByteArrayInputStream(remaining));
+            DataInputStream in = readBuf(buf);
             String clientSecret = in.readUTF();
 
             if (!secret.equals(clientSecret)) {
-                logger.warning("[ModlBridge] Query handshake failed: invalid secret from " + ctx.channel().remoteAddress());
-                sendResponse(ctx, (byte) 0x00);
+                plugin.getLogger().warning("Query handshake failed: invalid secret from " + ctx.channel().remoteAddress());
+                sendResponse(ctx, AUTH_FAILURE);
                 ctx.close();
                 return;
             }
 
             authenticated = true;
             queryServer.addAuthenticatedChannel(ctx.channel());
-            sendResponse(ctx, (byte) 0x01);
-            logger.info("[ModlBridge] Query client authenticated from " + ctx.channel().remoteAddress());
+            sendResponse(ctx, AUTH_SUCCESS);
+            plugin.getLogger().info("Query client authenticated from " + ctx.channel().remoteAddress());
 
             sendBridgeHello(ctx);
         } catch (IOException e) {
-            logger.warning("[ModlBridge] Query handshake error: " + e.getMessage());
+            plugin.getLogger().warning("Query handshake error: " + e.getMessage());
             ctx.close();
         }
     }
@@ -101,155 +95,124 @@ public class BridgeQueryHandler extends ChannelInboundHandlerAdapter {
     }
 
     private void sendBridgeHello(ChannelHandlerContext ctx) {
-        try {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-            DataOutputStream out = new DataOutputStream(bytes);
-            out.writeUTF("BRIDGE_HELLO");
-            out.writeUTF(Bukkit.getServer().getName());
-
-            ByteBuf buf = ctx.alloc().buffer();
-            buf.writeBytes(bytes.toByteArray());
+        byte[] data = queryServer.buildMessage("BRIDGE_HELLO", Bukkit.getServer().getName());
+        if (data != null) {
+            ByteBuf buf = ctx.alloc().buffer(data.length);
+            buf.writeBytes(data);
             ctx.writeAndFlush(buf);
-            logger.info("[ModlBridge] Sent BRIDGE_HELLO via TCP query");
-        } catch (IOException e) {
-            logger.warning("[ModlBridge] Failed to send BRIDGE_HELLO: " + e.getMessage());
+            plugin.getLogger().info("Sent BRIDGE_HELLO via TCP query");
         }
     }
 
     private void handleMessage(ChannelHandlerContext ctx, ByteBuf buf) {
-        byte[] data = new byte[buf.readableBytes()];
-        buf.readBytes(data);
-
         try {
-            DataInputStream in = new DataInputStream(new ByteArrayInputStream(data));
+            DataInputStream in = readBuf(buf);
             String action = in.readUTF();
 
             switch (action) {
-                case "STAT_WIPE" -> {
-                    String username = in.readUTF();
-                    String uuid = in.readUTF();
-                    String punishmentId = in.readUTF();
-
-                    logger.info("[StatWipe] Processing stat wipe for " + username +
-                            " (punishment: " + punishmentId + ") via TCP query");
-
-                    // Execute on main thread (dispatchCommand requires main thread)
-                    Bukkit.getScheduler().runTask(plugin, () -> {
-                        boolean success = statWipeHandler.execute(username, uuid, punishmentId);
-                        logger.info("[StatWipe] Stat wipe for " + username + " " +
-                                (success ? "succeeded" : "failed") +
-                                " (punishment: " + punishmentId + ")");
-                    });
-                }
+                case "STAT_WIPE" -> handleStatWipe(in);
                 case "FREEZE_PLAYER" -> {
                     String targetUuid = in.readUTF();
                     String staffUuid = in.readUTF();
-                    // Broadcast to all connected servers (including origin for enforcement)
-                    broadcastCurrentMessage(ctx, "FREEZE_PLAYER", targetUuid, staffUuid);
-                    // Execute locally on this Spigot server
-                    freezeHandler.freeze(targetUuid, staffUuid);
+                    broadcastAndRun(ctx, action, () -> freezeHandler.freeze(targetUuid, staffUuid), targetUuid, staffUuid);
                 }
                 case "UNFREEZE_PLAYER" -> {
                     String targetUuid = in.readUTF();
-                    broadcastCurrentMessage(ctx, "UNFREEZE_PLAYER", targetUuid);
-                    freezeHandler.unfreeze(targetUuid);
+                    broadcastAndRun(ctx, action, () -> freezeHandler.unfreeze(targetUuid), targetUuid);
                 }
                 case "FREEZE_LOGOUT" -> {
                     String playerUuid = in.readUTF();
                     String playerName = in.readUTF();
-                    // Broadcast freeze logout notification to all other servers
-                    broadcastCurrentMessage(ctx, "FREEZE_LOGOUT", playerUuid, playerName);
+                    broadcastMessage(ctx, action, playerUuid, playerName);
                 }
                 case "STAFF_MODE_ENTER" -> {
                     String staffUuid = in.readUTF();
                     String staffName = in.readUTF();
-                    broadcastCurrentMessage(ctx, "STAFF_MODE_ENTER", staffUuid, staffName);
-                    staffModeHandler.enterStaffMode(staffUuid);
+                    broadcastAndRun(ctx, action, () -> staffModeHandler.enterStaffMode(staffUuid), staffUuid, staffName);
                 }
                 case "STAFF_MODE_EXIT" -> {
                     String staffUuid = in.readUTF();
                     String staffName = in.readUTF();
-                    broadcastCurrentMessage(ctx, "STAFF_MODE_EXIT", staffUuid, staffName);
-                    staffModeHandler.exitStaffMode(staffUuid);
+                    broadcastAndRun(ctx, action, () -> staffModeHandler.exitStaffMode(staffUuid), staffUuid, staffName);
                 }
                 case "VANISH_ENTER" -> {
                     String staffUuid = in.readUTF();
                     String staffName = in.readUTF();
-                    broadcastCurrentMessage(ctx, "VANISH_ENTER", staffUuid, staffName);
-                    staffModeHandler.vanishFromBridge(staffUuid);
+                    broadcastAndRun(ctx, action, () -> staffModeHandler.vanishFromBridge(staffUuid), staffUuid, staffName);
                 }
                 case "VANISH_EXIT" -> {
                     String staffUuid = in.readUTF();
                     String staffName = in.readUTF();
-                    broadcastCurrentMessage(ctx, "VANISH_EXIT", staffUuid, staffName);
-                    staffModeHandler.unvanishFromBridge(staffUuid);
+                    broadcastAndRun(ctx, action, () -> staffModeHandler.unvanishFromBridge(staffUuid), staffUuid, staffName);
                 }
                 case "TARGET_REQUEST" -> {
                     String staffUuid = in.readUTF();
                     String targetUuid = in.readUTF();
-                    // Check if target is on this server, respond with location
                     handleTargetRequest(ctx, staffUuid, targetUuid);
                 }
                 case "CONNECT_SERVER" -> {
-                    // This is a proxy-only message, bridge just forwards
                     String playerUuid = in.readUTF();
                     String serverName = in.readUTF();
-                    broadcastCurrentMessage(ctx, "CONNECT_SERVER", playerUuid, serverName);
+                    broadcastMessage(ctx, action, playerUuid, serverName);
                 }
-                default -> logger.info("[ModlBridge] Received unknown query action: " + action);
+                default -> plugin.getLogger().info("Received unknown query action: " + action);
             }
         } catch (IOException e) {
-            logger.warning("[ModlBridge] Failed to read query message: " + e.getMessage());
+            plugin.getLogger().warning("Failed to read query message: " + e.getMessage());
         }
     }
 
-    private void broadcastCurrentMessage(ChannelHandlerContext ctx, String action, String... args) {
-        try {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            DataOutputStream dos = new DataOutputStream(baos);
-            dos.writeUTF(action);
-            for (String arg : args) {
-                dos.writeUTF(arg);
-            }
-            dos.flush();
-            queryServer.broadcastMessage(baos.toByteArray(), ctx.channel());
-        } catch (Exception e) {
-            logger.warning("[ModlBridge] Failed to broadcast " + action + ": " + e.getMessage());
+    private void handleStatWipe(DataInputStream in) throws IOException {
+        String username = in.readUTF();
+        String uuid = in.readUTF();
+        String punishmentId = in.readUTF();
+
+        plugin.getLogger().info("Processing stat-wipe for " + username +
+                " (punishment: " + punishmentId + ") via TCP query");
+
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            boolean success = statWipeHandler.execute(username, uuid, punishmentId);
+            plugin.getLogger().info("Stat-wipe for " + username + " " +
+                    (success ? "succeeded" : "failed") +
+                    " (punishment: " + punishmentId + ")");
+        });
+    }
+
+    /**
+     * Broadcast a message to all other connected servers, then execute a local action.
+     */
+    private void broadcastAndRun(ChannelHandlerContext ctx, String action, Runnable localAction, String... args) {
+        broadcastMessage(ctx, action, args);
+        localAction.run();
+    }
+
+    private void broadcastMessage(ChannelHandlerContext ctx, String action, String... args) {
+        byte[] data = queryServer.buildMessage(action, args);
+        if (data != null) {
+            queryServer.broadcastMessage(data, ctx.channel());
         }
     }
 
     private void handleTargetRequest(ChannelHandlerContext ctx, String staffUuid, String targetUuid) {
         Bukkit.getScheduler().runTask(plugin, () -> {
             org.bukkit.entity.Player target = Bukkit.getPlayer(UUID.fromString(targetUuid));
-            if (target != null && target.isOnline()) {
-                // Target is on this server, send response back
-                try {
-                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    DataOutputStream dos = new DataOutputStream(baos);
-                    dos.writeUTF("TARGET_RESPONSE");
-                    dos.writeUTF(staffUuid);
-                    dos.writeUTF(targetUuid);
-                    dos.writeUTF(Bukkit.getServer().getName());
-                    dos.flush();
+            if (target == null || !target.isOnline()) return;
 
-                    byte[] responseData = baos.toByteArray();
-                    ByteBuf buf = ctx.alloc().buffer(4 + responseData.length);
-                    buf.writeInt(responseData.length);
-                    buf.writeBytes(responseData);
-                    ctx.writeAndFlush(buf);
-                } catch (Exception e) {
-                    logger.warning("[ModlBridge] Failed to send TARGET_RESPONSE: " + e.getMessage());
-                }
-
-                // Set up local staff mode targeting
-                staffModeHandler.setTarget(staffUuid, targetUuid);
+            byte[] responseData = queryServer.buildMessage("TARGET_RESPONSE", staffUuid, targetUuid, Bukkit.getServer().getName());
+            if (responseData != null) {
+                ByteBuf buf = ctx.alloc().buffer(4 + responseData.length);
+                buf.writeInt(responseData.length);
+                buf.writeBytes(responseData);
+                ctx.writeAndFlush(buf);
             }
+
+            staffModeHandler.setTarget(staffUuid, targetUuid);
         });
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        logger.warning("[ModlBridge] Query connection error: " + cause.getMessage());
+        plugin.getLogger().warning("Query connection error: " + cause.getMessage());
         ctx.close();
     }
 
@@ -257,7 +220,16 @@ public class BridgeQueryHandler extends ChannelInboundHandlerAdapter {
     public void channelInactive(ChannelHandlerContext ctx) {
         if (authenticated) {
             queryServer.unregisterServer(ctx.channel());
-            logger.info("[ModlBridge] Query client disconnected: " + ctx.channel().remoteAddress());
+            plugin.getLogger().info("Query client disconnected: " + ctx.channel().remoteAddress());
         }
+    }
+
+    /**
+     * Read remaining bytes from a ByteBuf into a DataInputStream.
+     */
+    private static DataInputStream readBuf(ByteBuf buf) {
+        byte[] data = new byte[buf.readableBytes()];
+        buf.readBytes(data);
+        return new DataInputStream(new ByteArrayInputStream(data));
     }
 }
